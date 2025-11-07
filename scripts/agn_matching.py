@@ -1,37 +1,29 @@
-import matplotlib.pyplot as plt
+from astropy.io import fits
 from astropy.table import Table
 from astropy.coordinates import SkyCoord, match_coordinates_sky
 import astropy.units as u
 import pandas as pd
-
-#Read in the csv (pandas) and fits (astropy) files and convert to df 
-cosmos_df = pd.read_csv("AGN_TK_ver06-03-25.csv")
-champs_df = Table.read("champs_pybdsf_5sigma.fits").to_pandas()
-
-cosmos_coords = SkyCoord(ra=cosmos_df['RA_mean'].values * u.degree, dec=cosmos_df['DEC_mean'].values * u.degree)
-champs_coords = SkyCoord(ra=champs_df['RA'     ].values * u.degree, dec=champs_df['DEC'     ].values * u.degree)
-idx, d2d, _ = match_coordinates_sky(cosmos_coords, champs_coords)
-
-max_sep = d2d.arcsec < 0.6                                              # get to within 0.6 arcsec
-agn_matches    = cosmos_df[max_sep].reset_index(drop=True)
-champs_matches = champs_df.iloc[idx[max_sep]].reset_index(drop=True)
-
-pointing_path = "C:/Users/lejla/AGN_Matching/champs_calibrated_pointings.csv"
-pointings = pd.read_csv(pointing_path)
-
-source = pd.read_csv("agn_champs_matches_0.6arcsec.csv") # your overlapping catalog here
-
-#create image of COSMOS field with the AGN canidates
-size = 8
-fig = plt.figure(figsize=[10,7])
-ax = fig.add_subplot(111)
-plt.scatter(pointings.RA, pointings.DEC, s=10, marker= 'o',
-            facecolors='none', edgecolor='gray',label='ALMA Pointings')
-plt.scatter(source['RA'], source['DEC'],s=6,c='red',label='AGN Candidates')
-plt.xlabel('RA',size=15)
-plt.ylabel('DEC',size=15)
-plt.title("AGN Candidates with ALMA Observations in the COSMOS Field", size=16) 
-plt.legend()
-plt.gca().invert_xaxis()
-plt.show()
-
+import numpy as np
+from cigalePrepperV9_1 import cigalePrep
+champs = pd.read_csv("agn_champs_matches_0.6arcsec.csv")
+cosmos_path = 'C:/Users/lejla/AGN_Matching/COSMOSWeb_mastercatalog_v1.fits'
+cosmos = fits.open(cosmos_path)
+cosmos_phot   = Table.read(cosmos[1])
+cosmos_lephare = Table.read(cosmos[2]) 
+#CHAMPS: RA and DEC | COSMOS: ra and dec for COSMOS
+champs_coords = SkyCoord(ra=champs     ['RA'].values * u.deg, dec=champs    ['DEC'].values * u.deg)
+cosmos_coords = SkyCoord(ra=cosmos_phot['ra'].value * u.deg, dec=cosmos_phot['dec'].value * u.deg)
+#perform matching: AGN (CHAMPS) to COSMOS
+idx, d2d, _ = match_coordinates_sky(champs_coords, cosmos_coords)
+max_sep = 0.6 * u.arcsec
+mask = d2d < max_sep
+#these are the AGN that matched
+matched_champs = champs[mask]                     
+matched_cosmos_phot = cosmos_phot[idx[mask]]          
+matched_cosmos_lephare = cosmos_lephare[idx[mask]]   
+#filter out redshifts
+valid_z_mask = matched_cosmos_lephare['zfinal'] != -99
+matched_champs = matched_champs[valid_z_mask]
+matched_cosmos_phot = matched_cosmos_phot[valid_z_mask]
+matched_cosmos_lephare = matched_cosmos_lephare[valid_z_mask]
+cigalePrep(matched_cosmos_phot, matched_cosmos_lephare, "cigale_input_file.txt", ul=True)
